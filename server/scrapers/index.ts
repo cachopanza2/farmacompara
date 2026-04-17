@@ -89,15 +89,17 @@ async function guardarProductos(
         productoId = Number((inserted as any)[0]?.insertId ?? 0);
       }
 
-      // Insertar el precio del día
+      // Insertar el precio del día con los tres niveles de precio
       await db.insert(precios).values({
         productoId,
         farmaciaId,
         nombreEnFarmacia: prod.nombreEnFarmacia.substring(0, 300),
         urlProducto: prod.urlProducto.substring(0, 500),
         precioOriginal: prod.precioOriginal,
-        precioEfectivo: prod.precioEfectivo,
-        precioQr: prod.precioQr,
+        precioEfectivo: prod.precioEfectivo,   // El precio más bajo disponible
+        precioWeb: prod.precioWeb ?? prod.precioEfectivo, // Precio web con descuento general
+        precioQr: prod.precioQr,               // Precio con Itaú QR Débito
+        descripcionDescuentoQr: prod.descripcionDescuentoQr?.substring(0, 100) ?? null,
         porcentajeDescuento: prod.porcentajeDescuento,
         tienePromocion: prod.tienePromocion,
         disponible: true,

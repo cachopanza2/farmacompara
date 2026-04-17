@@ -126,7 +126,9 @@ async function scrapearPagina(
       urlProducto,
       precioOriginal,
       precioEfectivo,
-      precioQr: null,
+      precioWeb: precioEfectivo,  // Farmacenter no distingue precio web de precio efectivo
+      precioQr: null,              // Farmacenter no tiene precio QR
+      descripcionDescuentoQr: null,
       porcentajeDescuento,
       tienePromocion: (porcentajeDescuento ?? 0) > 0,
       codigoExterno: codprod,

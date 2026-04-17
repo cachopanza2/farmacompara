@@ -29,3 +29,12 @@
 - [ ] Exportar resultados a CSV/PDF
 - [ ] SEO: sitemap, meta tags, Open Graph
 - [ ] Métricas de uso: cuántas búsquedas, medicamentos más buscados
+
+## Precios por tarjeta / canal (v1.1)
+- [x] Investigar estructura HTML de precios por tarjeta en página de detalle de Punto Farma
+- [x] Actualizar schema BD: agregar columnas precioWeb y precioQr a tabla precios
+- [x] Actualizar scraper Punto Farma para capturar precio regular, precio web y precio Itaú QR
+- [x] Actualizar API buscarMedicamento para devolver los tres niveles de precio
+- [x] Actualizar cards de resultados para mostrar los tres precios con etiquetas visuales
+- [x] Re-ejecutar scraping y verificar datos reales con tres niveles de precio
+- [x] 39 de 61 productos con precio QR Itaú Débito capturado

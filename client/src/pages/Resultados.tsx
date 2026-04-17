@@ -11,6 +11,8 @@ import {
   Loader2,
   Tag,
   ArrowUpDown,
+  CreditCard,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,8 +61,16 @@ export default function Resultados() {
   }
 
   const resultados = data?.resultados ?? [];
+
+  // El precio mínimo considera el precio QR si está disponible
   const precioMinimo =
-    resultados.length > 0 ? Math.min(...resultados.map((r) => r.precioEfectivo)) : null;
+    resultados.length > 0
+      ? Math.min(
+          ...resultados.map((r) =>
+            r.precioQr && r.precioQr > 0 ? Math.min(r.precioEfectivo, r.precioQr) : r.precioEfectivo
+          )
+        )
+      : null;
 
   return (
     <div className="min-h-screen bg-gray-50 font-['DM_Sans']">
@@ -199,13 +209,45 @@ export default function Resultados() {
               </div>
             )}
 
+            {/* Leyenda de tipos de precio */}
+            {resultados.some((r) => r.precioQr) && (
+              <div className="flex flex-wrap gap-3 mb-5 text-xs text-gray-500">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-gray-400" />
+                  <span>Precio de lista</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Globe className="h-3.5 w-3.5 text-[#1B3A6B]" />
+                  <span className="text-[#1B3A6B] font-medium">Precio web exclusivo</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CreditCard className="h-3.5 w-3.5 text-orange-500" />
+                  <span className="text-orange-600 font-medium">Con tarjeta / QR</span>
+                </div>
+              </div>
+            )}
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {resultados.map((r) => {
-                const esMenorPrecio = r.precioEfectivo === precioMinimo;
+                // El precio más bajo real (puede ser QR o web)
+                const precioMasBajo =
+                  r.precioQr && r.precioQr > 0
+                    ? Math.min(r.precioEfectivo, r.precioQr)
+                    : r.precioEfectivo;
+                const esMenorPrecio = precioMasBajo === precioMinimo;
+
+                // Ahorro respecto al precio de lista
                 const ahorro =
                   r.precioOriginal && r.precioOriginal > r.precioEfectivo
                     ? r.precioOriginal - r.precioEfectivo
                     : null;
+
+                // ¿Tiene precio web distinto al precio de lista?
+                const tieneDescuentoWeb =
+                  r.precioOriginal && r.precioWeb && r.precioWeb < r.precioOriginal;
+
+                // ¿Tiene precio QR adicional?
+                const tieneQr = r.precioQr && r.precioQr > 0 && r.precioQr < r.precioEfectivo;
 
                 return (
                   <div
@@ -216,8 +258,11 @@ export default function Resultados() {
                         : "border-gray-100"
                     }`}
                   >
+                    {/* Barra de color de la farmacia */}
                     <div className="h-1.5 w-full" style={{ backgroundColor: r.farmaciaColor }} />
+
                     <div className="p-4">
+                      {/* Badges superiores */}
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="flex flex-wrap gap-1.5">
                           {esMenorPrecio && (
@@ -242,31 +287,69 @@ export default function Resultados() {
                         </div>
                       </div>
 
+                      {/* Nombre del producto */}
                       <h3 className="text-sm font-semibold text-gray-800 leading-snug mb-3 line-clamp-2">
                         {r.nombreEnFarmacia}
                       </h3>
 
-                      <div className="mb-3">
+                      {/* ── Bloque de precios (los tres niveles) ── */}
+                      <div className="mb-3 space-y-1.5">
+
+                        {/* 1. Precio de lista (tachado) */}
                         {r.precioOriginal && r.precioOriginal > r.precioEfectivo && (
-                          <p className="text-xs text-gray-400 line-through">
-                            {formatGs(r.precioOriginal)}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400 font-medium w-20 shrink-0">Regular</span>
+                            <span className="text-xs text-gray-400 line-through">
+                              {formatGs(r.precioOriginal)}
+                            </span>
+                          </div>
                         )}
-                        <p className="text-2xl font-bold text-gray-900">
-                          {formatGs(r.precioEfectivo)}
-                        </p>
-                        {r.precioQr && r.precioQr < r.precioEfectivo && (
-                          <p className="text-xs text-blue-600 font-medium mt-0.5">
-                            {formatGs(r.precioQr)} con QR/débito
-                          </p>
+
+                        {/* 2. Precio web con descuento general */}
+                        {tieneDescuentoWeb ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-[#1B3A6B] font-semibold w-20 shrink-0 flex items-center gap-1">
+                              <Globe className="h-3 w-3" />
+                              Web
+                            </span>
+                            <span className="text-xl font-bold text-gray-900">
+                              {formatGs(r.precioWeb!)}
+                            </span>
+                          </div>
+                        ) : (
+                          /* Si no hay precio web distinto, mostrar el precio efectivo como precio principal */
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500 font-medium w-20 shrink-0">Precio</span>
+                            <span className="text-xl font-bold text-gray-900">
+                              {formatGs(r.precioEfectivo)}
+                            </span>
+                          </div>
                         )}
-                        {ahorro && (
-                          <p className="text-xs text-[#10B981] font-medium mt-0.5">
-                            Ahorrás {formatGs(ahorro)}
+
+                        {/* 3. Precio con tarjeta QR (el más bajo) */}
+                        {tieneQr && (
+                          <div className="flex items-center gap-2 bg-orange-50 rounded-lg px-2 py-1.5 -mx-1">
+                            <span className="text-xs text-orange-600 font-semibold w-20 shrink-0 flex items-center gap-1">
+                              <CreditCard className="h-3 w-3" />
+                              {r.descripcionDescuentoQr
+                                ? r.descripcionDescuentoQr.replace("Itau", "Itaú")
+                                : "QR/Débito"}
+                            </span>
+                            <span className="text-xl font-bold text-orange-600">
+                              {formatGs(r.precioQr!)}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Ahorro total */}
+                        {ahorro && ahorro > 0 && (
+                          <p className="text-xs text-[#10B981] font-medium pt-0.5">
+                            Ahorrás {formatGs(ahorro)} vs. precio de lista
                           </p>
                         )}
                       </div>
 
+                      {/* Botón de acción */}
                       <a
                         href={r.urlProducto}
                         target="_blank"

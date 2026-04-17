@@ -15,6 +15,13 @@
       "when": 1776451755776,
       "tag": "0001_safe_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1776456202716,
+      "tag": "0002_violet_black_bird",
+      "breakpoints": true
     }
   ]
 }

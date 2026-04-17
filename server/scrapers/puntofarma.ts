@@ -3,9 +3,11 @@
  * Método: Next.js RSC payload (React Server Components)
  * URL: https://www.puntofarma.com.py/buscar?s={query}
  *
- * El sitio usa Next.js App Router con RSC. Al hacer GET con el header RSC:1
- * devuelve un payload de texto con líneas "hex:JSON" que contienen los datos
- * de productos con precios reales.
+ * Estructura de precios por producto:
+ * 1. precioOriginal  → campo "precio" del objeto producto (precio de lista)
+ * 2. precioEfectivo  → precio * (1 - descuento/100) = precio web con descuento general
+ * 3. precioQr        → objeto separado con "precioConDescuento" y "productoCodigo"
+ *                      (Itaú QR Débito, ~20% adicional sobre el precio web)
  */
 
 import axios from "axios";
@@ -13,9 +15,11 @@ import axios from "axios";
 export interface ProductoScraped {
   nombreEnFarmacia: string;
   urlProducto: string;
-  precioOriginal: number | null;
-  precioEfectivo: number;
-  precioQr: number | null;
+  precioOriginal: number | null;   // Precio de lista (sin descuento)
+  precioEfectivo: number;          // Precio web (con descuento general, ej: -18%)
+  precioWeb: number | null;        // Alias explícito del precio web
+  precioQr: number | null;         // Precio con Itaú QR Débito
+  descripcionDescuentoQr: string | null; // Ej: "Itaú QR Débito"
   porcentajeDescuento: number | null;
   tienePromocion: boolean;
   codigoExterno: string;
@@ -36,18 +40,29 @@ const HEADERS = {
 interface RscProducto {
   codigo: number;
   descripcion: string;
-  precio: number;
-  precioConDescuento: string | null;
-  descuento: number | null;
+  precio: number;         // Precio de lista
+  descuento: number | null; // Porcentaje de descuento web (ej: 18)
+  fotoPrincipal: string | null;
+}
+
+interface RscDescuentoForma {
+  productoCodigo: number;
+  precioConDescuento: string; // Precio QR como string
+  descripcion: string;        // Ej: "Itau QR Debito"
+  advertencia: string;        // Ej: "Exclusivo con Tarjeta de Débito Itaú QR"
 }
 
 /**
- * Parsea el RSC payload de Next.js para extraer objetos JSON de productos.
- * El formato es líneas con "hex:JSON" donde cada línea es un fragmento de datos.
+ * Parsea el RSC payload de Next.js para extraer:
+ * - Objetos de productos (con precio de lista y descuento web)
+ * - Objetos de descuentos por forma de pago (precio QR Itaú)
  */
-function parseRscPayload(payload: string): RscProducto[] {
-  const products: RscProducto[] = [];
-  const seen = new Set<number>();
+function parseRscPayload(payload: string): {
+  products: Map<number, RscProducto>;
+  qrPrices: Map<number, RscDescuentoForma>;
+} {
+  const products = new Map<number, RscProducto>();
+  const qrPrices = new Map<number, RscDescuentoForma>();
 
   const lines = payload.split("\n");
   for (const line of lines) {
@@ -60,21 +75,36 @@ function parseRscPayload(payload: string): RscProducto[] {
     try {
       const data = JSON.parse(jsonStr);
 
-      // Identificar objetos de producto: tienen "codigo" numérico, "descripcion" y "precio"
+      // Objeto de producto: tiene "codigo" numérico, "descripcion" y "precio"
       if (
         typeof data.codigo === "number" &&
         typeof data.descripcion === "string" &&
         typeof data.precio === "number" &&
         data.precio > 0 &&
-        !seen.has(data.codigo)
+        !products.has(data.codigo)
       ) {
-        seen.add(data.codigo);
-        products.push({
+        products.set(data.codigo, {
           codigo: data.codigo,
           descripcion: data.descripcion,
           precio: data.precio,
-          precioConDescuento: data.precioConDescuento ?? null,
-          descuento: data.descuento ?? null,
+          descuento: typeof data.descuento === "number" ? data.descuento : null,
+          fotoPrincipal: data.fotoPrincipal ?? null,
+        });
+      }
+
+      // Objeto de descuento por forma de pago (QR Itaú):
+      // tiene "precioConDescuento" (string), "productoCodigo" y "descripcion"
+      if (
+        typeof data.precioConDescuento === "string" &&
+        typeof data.productoCodigo === "number" &&
+        typeof data.descripcion === "string" &&
+        !qrPrices.has(data.productoCodigo)
+      ) {
+        qrPrices.set(data.productoCodigo, {
+          productoCodigo: data.productoCodigo,
+          precioConDescuento: data.precioConDescuento,
+          descripcion: data.descripcion,
+          advertencia: data.advertencia ?? "",
         });
       }
     } catch {
@@ -82,12 +112,15 @@ function parseRscPayload(payload: string): RscProducto[] {
     }
   }
 
-  return products;
+  return { products, qrPrices };
 }
 
 /**
- * Scrapea los productos de ibuprofeno de Punto Farma usando el RSC payload.
- * Soporta paginación automática hasta obtener todos los resultados.
+ * Scrapea los productos de Punto Farma usando el RSC payload.
+ * Captura tres niveles de precio por producto:
+ * 1. Precio de lista (campo "precio")
+ * 2. Precio web con descuento general (precio × (1 - descuento/100))
+ * 3. Precio con Itaú QR Débito (objeto separado "precioConDescuento")
  */
 export async function scrapearPuntoFarma(
   query: string = "ibuprofeno",
@@ -112,27 +145,42 @@ export async function scrapearPuntoFarma(
       });
 
       const payload = resp.data as string;
-      const products = parseRscPayload(payload);
+      const { products, qrPrices } = parseRscPayload(payload);
 
-      console.log(`[PuntoFarma] Página ${page}: ${products.length} productos`);
+      console.log(
+        `[PuntoFarma] Página ${page}: ${products.size} productos, ${qrPrices.size} precios QR`
+      );
 
-      if (products.length === 0) break;
+      if (products.size === 0) break;
 
       let newCount = 0;
-      for (const p of products) {
-        if (!seen.has(p.codigo)) {
-          seen.add(p.codigo);
+      for (const [codigo, p] of Array.from(products.entries())) {
+        if (!seen.has(codigo)) {
+          seen.add(codigo);
 
-          // Precio efectivo: usar precioConDescuento si existe, sino precio normal
-          const precioEfectivo = p.precioConDescuento
-            ? Math.round(Number(p.precioConDescuento))
-            : p.precio;
+          // ── Precio de lista (sin descuento) ──────────────────────────────
+          const precioOriginal = p.precio;
 
-          // Precio original: si hay descuento, el precio original es el mayor
-          const precioOriginal =
-            p.precioConDescuento && Number(p.precioConDescuento) < p.precio
-              ? p.precio
-              : null;
+          // ── Precio web (con descuento general) ───────────────────────────
+          // Ej: precio=9555, descuento=18 → precioWeb = 9555 × 0.82 = 7835
+          const precioWeb =
+            p.descuento && p.descuento > 0
+              ? Math.round(p.precio * (1 - p.descuento / 100))
+              : p.precio;
+
+          // ── Precio QR Itaú Débito ─────────────────────────────────────────
+          const qrInfo = qrPrices.get(codigo);
+          const precioQr = qrInfo
+            ? Math.round(Number(qrInfo.precioConDescuento))
+            : null;
+          const descripcionQr = qrInfo
+            ? qrInfo.descripcion.replace(/\u00c3\u00ba/g, "ú").replace(/\u00c3\u00a9/g, "é")
+            : null;
+
+          // ── Precio efectivo = precio web (con descuento general) ─────────
+          // precioEfectivo es el precio web exclusivo para compras en línea
+          // precioQr es el precio adicional con tarjeta Itaú QR (aún más bajo)
+          const precioEfectivo = precioWeb;
 
           // URL del producto
           const slugPart = p.descripcion
@@ -145,13 +193,15 @@ export async function scrapearPuntoFarma(
 
           allProducts.push({
             nombreEnFarmacia: p.descripcion,
-            urlProducto: `${BASE_URL}/producto/${p.codigo}/${slugPart}`,
+            urlProducto: `${BASE_URL}/producto/${codigo}/${slugPart}`,
             precioOriginal,
             precioEfectivo,
-            precioQr: null, // El precio QR es adicional, no lo usamos como precio principal
+            precioWeb,
+            precioQr,
+            descripcionDescuentoQr: descripcionQr,
             porcentajeDescuento: p.descuento,
             tienePromocion: (p.descuento ?? 0) > 0,
-            codigoExterno: String(p.codigo),
+            codigoExterno: String(codigo),
           });
           newCount++;
         }

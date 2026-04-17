@@ -70,9 +70,11 @@ export const precios = mysqlTable(
       .references(() => farmacias.id),
     nombreEnFarmacia: varchar("nombre_en_farmacia", { length: 300 }).notNull(),
     urlProducto: varchar("url_producto", { length: 500 }).notNull(),
-    precioOriginal: int("precio_original"),
-    precioEfectivo: int("precio_efectivo").notNull(),
-    precioQr: int("precio_qr"),
+    precioOriginal: int("precio_original"),      // Precio de lista (sin descuento)
+    precioEfectivo: int("precio_efectivo").notNull(), // Precio web (con descuento general)
+    precioWeb: int("precio_web"),                  // Precio exclusivo web (alias explícito)
+    precioQr: int("precio_qr"),                    // Precio con tarjeta Itaú QR Débito
+    descripcionDescuentoQr: varchar("descripcion_descuento_qr", { length: 100 }), // Ej: "Itaú QR Débito"
     porcentajeDescuento: int("porcentaje_descuento"),
     tienePromocion: boolean("tiene_promocion").default(false).notNull(),
     disponible: boolean("disponible").default(true).notNull(),
