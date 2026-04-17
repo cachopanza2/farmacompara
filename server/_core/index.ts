@@ -8,45 +8,91 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { ejecutarScrapingCompleto, inicializarFarmacias } from "../scrapers/index";
+import { notifyOwner } from "./notification";
 
-// ── Cron: scraping diario a las 02:00 AM (Paraguay, GMT-4 = UTC-4) ──────────
-function programarScrapingDiario() {
-  const MEDICAMENTOS_INICIALES = ["ibuprofeno", "paracetamol", "amoxicilina", "omeprazol"];
+// ── Cron: scraping diario a las 07:00 AM (Paraguay, UTC-4 = 11:00 UTC) ─────
+const MEDICAMENTOS_INICIALES = ["ibuprofeno", "paracetamol", "amoxicilina", "omeprazol"];
 
-  function calcularMsHastaProximas2AM(): number {
-    const ahora = new Date();
-    // Paraguay es UTC-4
-    const ahoraParaguay = new Date(ahora.getTime() - 4 * 60 * 60 * 1000);
-    const proximas2AM = new Date(ahoraParaguay);
-    proximas2AM.setHours(2, 0, 0, 0);
-    if (proximas2AM <= ahoraParaguay) {
-      proximas2AM.setDate(proximas2AM.getDate() + 1);
-    }
-    return proximas2AM.getTime() - ahoraParaguay.getTime();
+function calcularMsHastaProximas7AM(): number {
+  const ahora = new Date();
+  // Paraguay es UTC-4: restamos 4h para obtener la hora local
+  const ahoraParaguay = new Date(ahora.getTime() - 4 * 60 * 60 * 1000);
+  const proximas7AM = new Date(ahoraParaguay);
+  proximas7AM.setHours(7, 0, 0, 0);
+  if (proximas7AM <= ahoraParaguay) {
+    proximas7AM.setDate(proximas7AM.getDate() + 1);
   }
+  return proximas7AM.getTime() - ahoraParaguay.getTime();
+}
 
+function programarScrapingDiario() {
   async function ejecutarScraping() {
-    console.log("[Cron] Iniciando scraping diario automático...");
+    const inicio = new Date();
+    console.log(`[Cron] ===== Scraping diario automático iniciado: ${inicio.toISOString()} =====`);
+    const resumen: string[] = [];
+    let totalProductos = 0;
+    let errores = 0;
+
     try {
       await inicializarFarmacias();
       for (const med of MEDICAMENTOS_INICIALES) {
         console.log(`[Cron] Scrapeando: ${med}`);
-        await ejecutarScrapingCompleto(med);
-        await new Promise(r => setTimeout(r, 3000));
+        try {
+          const resultados = await ejecutarScrapingCompleto(med);
+          const count = resultados.reduce((sum, r) => sum + r.productosGuardados, 0);
+          totalProductos += count;
+          resumen.push(`✅ ${med}: ${count} productos`);
+        } catch (err) {
+          errores++;
+          resumen.push(`❌ ${med}: error - ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`[Cron] Error scrapeando ${med}:`, err);
+        }
+        // Pausa entre medicamentos para no sobrecargar los sitios
+        await new Promise(r => setTimeout(r, 5000));
       }
-      console.log("[Cron] Scraping diario completado.");
+
+      const duracionSeg = Math.round((Date.now() - inicio.getTime()) / 1000);
+      const fechaParaguay = new Date(inicio.getTime() - 4 * 60 * 60 * 1000);
+      const fechaStr = fechaParaguay.toLocaleDateString('es-PY', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const horaStr = fechaParaguay.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' });
+
+      const notifTitle = `FarmaCompara — Actualización diaria ${fechaStr}`;
+      const notifContent = [
+        `Scraping automático completado a las ${horaStr} (hora Paraguay).`,
+        ``,
+        `**Resumen:**`,
+        ...resumen,
+        ``,
+        `**Total:** ${totalProductos} precios actualizados en ${duracionSeg}s`,
+        errores > 0 ? `⚠️ ${errores} medicamento(s) con error.` : `Sin errores.`,
+      ].join('\n');
+
+      console.log(`[Cron] ===== Completado: ${totalProductos} productos, ${duracionSeg}s =====`);
+
+      // Notificar al owner
+      try {
+        await notifyOwner({ title: notifTitle, content: notifContent });
+        console.log('[Cron] Notificación enviada al owner.');
+      } catch (notifErr) {
+        console.warn('[Cron] No se pudo enviar notificación:', notifErr);
+      }
     } catch (err) {
-      console.error("[Cron] Error en scraping diario:", err);
+      console.error('[Cron] Error crítico en scraping diario:', err);
     }
-    // Programar el siguiente
-    setTimeout(ejecutarScraping, calcularMsHastaProximas2AM());
+
+    // Programar el siguiente ciclo
+    const msHastaSiguiente = calcularMsHastaProximas7AM();
+    const horas = Math.floor(msHastaSiguiente / 3600000);
+    const minutos = Math.floor((msHastaSiguiente % 3600000) / 60000);
+    console.log(`[Cron] Próximo scraping en ${horas}h ${minutos}min (07:00 AM Paraguay)`);
+    setTimeout(ejecutarScraping, msHastaSiguiente);
   }
 
-  const msHasta2AM = calcularMsHastaProximas2AM();
-  const horas = Math.floor(msHasta2AM / 3600000);
-  const minutos = Math.floor((msHasta2AM % 3600000) / 60000);
-  console.log(`[Cron] Próximo scraping en ${horas}h ${minutos}min (02:00 AM Paraguay)`);
-  setTimeout(ejecutarScraping, msHasta2AM);
+  const msHasta7AM = calcularMsHastaProximas7AM();
+  const horas = Math.floor(msHasta7AM / 3600000);
+  const minutos = Math.floor((msHasta7AM % 3600000) / 60000);
+  console.log(`[Cron] Próximo scraping en ${horas}h ${minutos}min (07:00 AM Paraguay)`);
+  setTimeout(ejecutarScraping, msHasta7AM);
 }
 
 function isPortAvailable(port: number): Promise<boolean> {

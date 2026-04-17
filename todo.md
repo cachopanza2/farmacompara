@@ -38,3 +38,9 @@
 - [x] Actualizar cards de resultados para mostrar los tres precios con etiquetas visuales
 - [x] Re-ejecutar scraping y verificar datos reales con tres niveles de precio
 - [x] 39 de 61 productos con precio QR Itaú Débito capturado
+
+## Scraping automático diario (v1.2)
+- [x] Actualizar cron job del servidor: 7:00 AM hora Paraguay (UTC-4 → 11:00 UTC)
+- [x] Agregar notificación al owner (título + resumen) tras cada scraping automático
+- [x] Programar tarea de respaldo en Manus Scheduler (7:05 AM Paraguay) como failsafe
+- [x] Verificar que el cron se ejecuta correctamente y loguea en la BD
